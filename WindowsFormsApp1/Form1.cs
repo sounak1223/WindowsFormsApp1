@@ -8,23 +8,29 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using System.Management;
+using System.Windows;
+using System.Threading.Tasks;
 
 namespace WindowsFormsApp1
 {
     public partial class Form1 : Form
     {
         // set up some global variables to be used later
-        int StartCount = 0;
-        double x;
         Boolean cursor = true;
         string selectedType;
         int frequency;
         int amplitude;
-        int offset;
         SerialPort port;
         String getValue;
         int counter = 0;
         Thread masterthread;
+        Boolean WaveGenOn = false;
+        Boolean multimeterOn = true;
+        String mode;
+
+        float coordinate1 = 0;
+        float coordinate2 = 0;
+        float time = 0;
         public Form1()
         {
             InitializeComponent();
@@ -79,11 +85,14 @@ namespace WindowsFormsApp1
             chart1.Series["Line2"].Color = Color.Red;
 
             // add default values for wave gen
-            comboBox1.Text = "Sine";
-            comboBox2.Text = "1000";
-            comboBox3.Text = "1";
-            comboBox4.Text = "0";
-            comboBox5.Text = "Gen 1";
+            comboBox1.Text = "None";
+            comboBox2.Text = "0";
+            comboBox3.Text = "0";
+            comboBox4.Text = "50";
+            comboBox5.Text = "0";
+            comboBox6.Text = "0";
+            label3.Visible = false;
+            comboBox4.Visible = false;
             plotSelectedOptions();
 
         }
@@ -159,8 +168,8 @@ namespace WindowsFormsApp1
                         double y2_val = Math.Round(x2_Point.YValues[0],3);
 
                         // Add label to mouse click
-                        curr_label.Location = new Point((int)me.X, (int)me.Y);
-                        curr_cursor.Location = new Point((int)me.X, 20);
+                        curr_label.Location = new System.Drawing.Point((int)me.X, (int)me.Y);
+                        curr_cursor.Location = new System.Drawing.Point((int)me.X, 110);
 
                         // Add text to label 
                         line_1_x_value = Math.Round(line_1_x_value, 2);
@@ -185,7 +194,7 @@ namespace WindowsFormsApp1
                 chart1.Series["Line1"].Points.Clear();
                 chart1.Series["Line2"].Points.Clear();
                 OscilliscopeStartButton.Text = "Stop";
-                port.WriteLine("Q");
+                port.WriteLine("O");
 
             }
             else
@@ -194,59 +203,81 @@ namespace WindowsFormsApp1
                 port.WriteLine("P");
             }
         }
-        void runit()
+        private async void runit()
         {
             while (true)    
             {
                 // read input continuously
                 getValue = port.ReadLine();
-                Debug.WriteLine(getValue);
-                label10.Invoke((MethodInvoker)(() => label10.Text = getValue));
-                float coordinate1 = 0;
-                float coordinate2 = 0;
-                if ((getValue != null) && (getValue.Substring(0, 1).Equals("$")) && (OscilliscopeStartButton.Text.Equals("Stop")))
+                if ((getValue != null) && (getValue.Contains(",")) && (OscilliscopeStartButton.Text.Equals("Stop")))
                 {
-                    getValue = getValue.Substring(1);
-                    coordinate1 = float.Parse(getValue.Split('@')[0]);
-                    coordinate2 = float.Parse(getValue.Split('@')[1]);
+                    String[] args = getValue.Split(',');
+                    coordinate1 = float.Parse(args[0]);
+                    coordinate2 = float.Parse(args[1]);
+                    time += float.Parse(args[2])*50;
 
                     // if it is a number plot it
-                    chart1.Invoke((MethodInvoker)(() => chart1.Series["Line1"].Points.AddXY(counter, coordinate1)));
-                    chart1.Invoke((MethodInvoker)(() => chart1.Series["Line2"].Points.AddXY(counter, coordinate2)));
-                    if (chart1.Series["Line1"].Points.Count > 100)
+                    chart1.Invoke((MethodInvoker)(() => chart1.Series["Line1"].Points.AddXY(time, coordinate1)));
+                    chart1.Invoke((MethodInvoker)(() => chart1.Series["Line2"].Points.AddXY(time, coordinate2)));
+                    if (chart1.Series["Line1"].Points.Count > 50)
                     {
                         chart1.Invoke((MethodInvoker)(() => chart1.Series["Line1"].Points.RemoveAt(0)));
                         chart1.Invoke((MethodInvoker)(() => chart1.Series["Line2"].Points.RemoveAt(0)));
-                        chart1.Invoke((MethodInvoker)(() => chart1.ChartAreas[0].AxisX.Minimum = Convert.ToInt32(chart1.Series["Line1"].Points[0].XValue)));
+                        //chart1.Invoke((MethodInvoker)(() => chart1.ChartAreas[0].AxisX.Minimum = Convert.ToInt32(chart1.Series["Line1"].Points[0].XValue)));
+                        //Debug.WriteLine(Convert.ToInt32(chart1.Series["Line1"].Points[0].XValue));
                     }
                     counter++;
                     if (counter % 20 == 0)
                     {
-                        port.WriteLine("Q");
+                        port.WriteLine("O");
                     }
 
                 }
                 
                 // otherwise check for any other expected behavior
-                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0,1).Equals("c"))
+                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0,1).Equals("C") && multimeterOn && mode.Equals("Voltage (Volts)"))
                 {
-                    label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1,5)+" Volts"));   
+                    float resistance = float.Parse(getValue.Substring(1));
+                    if (resistance < 0)
+                    {
+                        label10.Invoke((MethodInvoker)(() => label10.Text = "open"));
+                    }
+                    else
+                    {
+                        label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1, 5) + " Volts"));
+                    }
+                    await Task.Delay(500);
+                    port.WriteLine("Q");
                 }
-                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("D"))
+                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("D") && multimeterOn && mode.Equals("Current (Ampere)"))
                 {
-                    label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + " Amperes"));
+                    float resistance = float.Parse(getValue.Substring(1))-5;
+                   
+                    label10.Invoke((MethodInvoker)(() => label10.Text = resistance + " mA"));
+                    await Task.Delay(500);
+                    port.WriteLine("R");
                 }
-                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("E"))
+                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("E") && multimeterOn && mode.Equals("Resistance (Ohms)"))
                 {
-                    label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + ". ohms"));
+                    float resistance = float.Parse(getValue.Substring(1));
+                    if (resistance < 0)
+                    {
+                        label10.Invoke((MethodInvoker)(() => label10.Text = "open"));
+                    }
+                    else
+                    {
+                        label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + " \u2126"));
+                    }
+                    await Task.Delay(500);
+                    port.WriteLine("S");
                 }
-                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("F"))
+                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("F") && multimeterOn && mode.Equals("Inductance (Henry)"))
                 {
                     label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + " Henry"));
                 }
-                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("G"))
+                else if (!string.IsNullOrEmpty(getValue) && getValue.Substring(0, 1).Equals("G") && multimeterOn && mode.Equals("Capacitance (Farads)"))
                 {
-                    label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + " Farhad"));
+                    label10.Invoke((MethodInvoker)(() => label10.Text = getValue.Substring(1) + " Farad"));
                 }
                 else if (!string.IsNullOrEmpty(getValue) && getValue.Contains("PIC32MZ 403 Demo"))
                 {
@@ -291,6 +322,22 @@ namespace WindowsFormsApp1
         // plot graph on any option changed
         private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
         {
+
+            if (comboBox1.Text.Contains("Sine"))
+            {
+                label3.Visible = false;
+                comboBox4.Visible = false;
+            }
+            else if (comboBox1.Text.Contains("None"))
+            {
+                label3.Visible = false;
+                comboBox4.Visible = false;
+            }
+            else
+            {
+                label3.Visible = true;
+                comboBox4.Visible = true;
+            }
             plotSelectedOptions();
         }
         private void comboBox2_SelectedIndexChanged(object sender, EventArgs e)
@@ -318,7 +365,6 @@ namespace WindowsFormsApp1
                 selectedType = (string)comboBox1.Text;
                 frequency = Convert.ToInt32(comboBox2.Text);
                 amplitude = Convert.ToInt32(comboBox3.Text);
-                offset = Convert.ToInt32(comboBox4.Text);
 
                 // plot for each type
                 if (string.Equals(selectedType, "Sine"))
@@ -327,92 +373,58 @@ namespace WindowsFormsApp1
                     chart2.Series[0].Points.Clear();
                     for (double i = 0; i < 6.27; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, (amplitude*Math.Sin(i)) + offset);
+                        chart2.Series[0].Points.AddXY(i, (amplitude*Math.Sin(i)));
                     }
                 }
                 else if (string.Equals(selectedType, "DC"))
                 {
-                    label6.Text = "Duty Cycle";
                     chart2.Series[0].Points.Clear();
                     for (double i = 0; i < 6.27; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, amplitude + offset);
+                        chart2.Series[0].Points.AddXY(i, amplitude);
                     }
                 }
                 else if (string.Equals(selectedType, "Square"))
                 {
-                    label6.Text = "Duty Cycle";
                     chart2.Series[0].Points.Clear();
                     for (double i = 0; i < 2.09; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, amplitude + offset);
+                        chart2.Series[0].Points.AddXY(i, amplitude);
                     }
                     for (double i = 2.09; i < 4.18; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, 0.001 + offset);
+                        chart2.Series[0].Points.AddXY(i, 0.001);
                     }
                     for (double i = 4.18; i < 6.27; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, amplitude + offset);
+                        chart2.Series[0].Points.AddXY(i, amplitude);
                     }
                 }
                 else if (string.Equals(selectedType, "Triangle"))
                 {
-                    label6.Text = "Duty Cycle";
                     chart2.Series[0].Points.Clear();
                     for (double i = 0; i < 2.09; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, (amplitude*i) + offset);
+                        chart2.Series[0].Points.AddXY(i, (amplitude*i));
                     }
                     double j = 2.09;
                     for (double i = 2.09; i < 4.18; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, (amplitude*j) + offset);
+                        chart2.Series[0].Points.AddXY(i, (amplitude*j));
                         j -= .01;
                     }
                     for (double i = 4.18; i < 6.27; i += 0.01)
                     {
-                        chart2.Series[0].Points.AddXY(i, (amplitude*(i - (2.09 * 2))) + offset);
+                        chart2.Series[0].Points.AddXY(i, (amplitude*(i - (2.09 * 2))));
                     }
                 }
-                else if (string.Equals(selectedType, "RampUp"))
-                {
-                    label6.Text = "Duty Cycle";
-                    chart2.Series[0].Points.Clear();
-                    for (double i = 0; i < 3.14; i += 0.01)
-                    {
-                        chart2.Series[0].Points.AddXY(i, amplitude*i + offset);
-                    }
-                    for (double i = 0; i < 3.14; i += 0.01)
-                    {
-                        chart2.Series[0].Points.AddXY(3.14 + i, amplitude*i + offset);
-                    }
-                }
-                else if (string.Equals(selectedType, "RampDown"))
-                {
-                    label6.Text = "Duty Cycle";
-                    chart2.Series[0].Points.Clear();
-                    for (double i = 0; i < 3.14; i += 0.01)
-                    {
-                        chart2.Series[0].Points.AddXY(i, amplitude*(3.14 - i) + offset);
-                    }
-                    for (double i = 0; i < 3.14; i += 0.01)
-                    {
-                        chart2.Series[0].Points.AddXY(3.14 + i, amplitude*(3.14 - i) + offset);
-                    }
-                }
+                
             }
         }
 
         private void comboBox7_SelectedIndexChanged(object sender, EventArgs e)
         {
-            // send multimeter information to microcontroller
-            String choice = comboBox7.SelectedItem as String;
-            if (choice.Equals("Voltage (Volts)")) {port.WriteLine("Q");}
-            if (choice.Equals("Current (Ampere)")) {port.WriteLine("R");}
-            if (choice.Equals("Resistance (Ohms)")) {port.WriteLine("S");}
-            if (choice.Equals("Inductance (Henry)")) {port.WriteLine("T");}
-            if (choice.Equals("Capacitance (Farads)")) {port.WriteLine("U");}
+            dealWithMultimeterStuff();
         }
 
         private void label4_Click(object sender, EventArgs e)
@@ -427,49 +439,14 @@ namespace WindowsFormsApp1
 
         private void button1_Click(object sender, EventArgs e)
         {
-            int amplitude = 0;
-            if (comboBox1.SelectedItem.Equals("Sine"))
-            {
-                port.WriteLine("F");
-                amplitude = (int)((float.Parse(comboBox3.Text)/2.5)*127);
-            }
-            else if (comboBox1.SelectedItem.Equals("Square"))
-            {
-                port.WriteLine("G");
-                amplitude = (int)((float.Parse(comboBox3.Text) / 10.3) * 127);
-            }
-            else if (comboBox1.SelectedItem.Equals("Triangle"))
-            {
-                port.WriteLine("H");
-                amplitude = (int)((float.Parse(comboBox3.Text) / 3.55) * 127);
-            }
-            else if (comboBox1.SelectedItem.Equals("RampUp"))
-            {
-                port.WriteLine("I");
-            }
-            else if (comboBox1.SelectedItem.Equals("RampDown"))
-            {
-                port.WriteLine("J");
-            }
-            // Frequency
-            port.WriteLine("K"+ comboBox2.Text);
-
-            // Amplitude
-            port.WriteLine("L" + amplitude);
-            Debug.WriteLine("L" + amplitude);
-
-            // Offset
-            port.WriteLine("M" + comboBox4.Text);
-            Debug.WriteLine("Sent M" + comboBox4.Text);
-
-            
-            port.WriteLine("C" + comboBox5.Text);
-            port.WriteLine("D" + comboBox6.Text);
+            WaveGenOn = true;
+            startWavegen();
 
         }
 
         private void button2_Click_1(object sender, EventArgs e)
         {
+            WaveGenOn = false;
             port.WriteLine("A");
             port.WriteLine("C0");
             port.WriteLine("D0");
@@ -479,6 +456,133 @@ namespace WindowsFormsApp1
         {
 
         }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            port.WriteLine("F");
+            port.WriteLine("L0x32");
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            port.WriteLine("A");
+            port.WriteLine("C0");
+            port.WriteLine("D0");
+        }
+        private void startWavegen()
+        {
+            if (WaveGenOn)
+            {
+                int amplitude = 0;
+                int duty = (int)((float.Parse(comboBox4.Text) / 100.0) * 127);
+                if (comboBox1.SelectedItem.Equals("Sine"))
+                {
+                    port.WriteLine("F");
+                    Debug.WriteLine("F");
+                    amplitude = (int)((float.Parse(comboBox3.Text) / 3.255) * 127);
+                }
+                else if (comboBox1.SelectedItem.Equals("Square"))
+                {
+                    port.WriteLine("G");
+                    amplitude = (int)((float.Parse(comboBox3.Text) / 15.3) * 127);
+                }
+                else if (comboBox1.SelectedItem.Equals("Triangle"))
+                {
+                    port.WriteLine("H");
+                    amplitude = (int)((float.Parse(comboBox3.Text) / 4.84) * 127);
+                }
+                else
+                {
+                    port.WriteLine("A");
+                }
+
+                // Frequency
+                int freq = int.Parse(comboBox2.Text);
+                if (freq > 200)
+                {
+                    port.WriteLine("J3");
+                    freq = (int)((freq / 2012.49) * 127);
+                }
+                else
+                {
+                    port.WriteLine("J4");
+                    freq = (int)((freq / 250.32) * 127);
+                }
+                port.WriteLine("K" + Convert.ToString(freq, 16));
+
+                // Amplitude
+                port.WriteLine("L0x" + Convert.ToString(amplitude, 16));
+
+                //Duty Cycle
+                if (!comboBox1.SelectedItem.Equals("Sine"))
+                {
+                    port.WriteLine("M0x" + Convert.ToString(duty, 16));
+                    Debug.WriteLine("M0x" + Convert.ToString(duty, 16));
+                }
+                else
+                {
+                    port.WriteLine("M0x3F");
+                }
+
+                port.WriteLine("C" + comboBox5.Text);
+                port.WriteLine("D" + comboBox6.Text);
+            }
+        }
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+            dealWithMultimeterStuff();
+        }
+        public void dealWithMultimeterStuff()
+        {
+            // send multimeter information to microcontroller
+            if (comboBox7.SelectedItem.Equals("Voltage (Volts)"))
+            {
+                mode = "Voltage (Volts)";
+                port.WriteLine("Q");
+                startWavegen();
+                button4.Visible = false;
+            }
+            if (comboBox7.SelectedItem.Equals("Current (Ampere)"))
+            {
+                mode = "Current (Ampere)";
+                port.WriteLine("R");
+                startWavegen();
+                button4.Visible = false;
+            }
+            if (comboBox7.SelectedItem.Equals("Resistance (Ohms)"))
+            {
+                mode = "Resistance (Ohms)";
+                port.WriteLine("S");
+                startWavegen();
+                button4.Visible = false;
+            }
+            if (comboBox7.SelectedItem.Equals("Inductance (Henry)"))
+            {
+                mode = "Inductance (Henry)";
+                port.WriteLine("T");
+                button4.Visible = true;
+
+            }
+            if (comboBox7.SelectedItem.Equals("Capacitance (Farads)"))
+            {
+                mode = "Capacitance (Farads)";
+                port.WriteLine("U");
+                button4.Visible = true;
+            }
+        }
+        private void button5_Click(object sender, EventArgs e)
+        {
+            if (multimeterOn)
+            {
+                button5.Text = "Resume";
+            }
+            else
+            {
+                button5.Text = "Pause";
+                dealWithMultimeterStuff();
+            }
+            multimeterOn = !multimeterOn;
+        }
     }
 }
-
